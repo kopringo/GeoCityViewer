@@ -21,18 +21,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build site
-        run: |
-          # tutaj Twoja komenda generująca stronę
-          # np. make build
-          # albo npm ci && npm run build
-          echo "build done"
+      - name: Install GDAL
+        run: sudo apt-get update && sudo apt-get install -y gdal-bin python3-gdal
+
+      - name: Build buildings.json
+        run: python3 gpkg_to_json.py data/ -o pub/data/buildings.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./pub
-          # albo: ./html
 
   deploy:
     needs: build

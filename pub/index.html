@@ -1,1 +1,481 @@
-index
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoCity Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #1e293b;
+      background: #f8fafc;
+    }
+
+    .app {
+      display: flex;
+      height: 100%;
+    }
+
+    .sidebar {
+      width: 200px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1rem;
+      background: #fff;
+      border-right: 1px solid #e2e8f0;
+      overflow-y: auto;
+    }
+
+    .logo {
+      width: 100%;
+      height: auto;
+    }
+
+    .panel-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      line-height: 1.4;
+      color: #64748b;
+      padding: 0.5rem;
+      background: #f1f5f9;
+      border-radius: 0.375rem;
+    }
+
+    .hint.hidden {
+      display: none;
+    }
+
+    .filters {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .filter-row label {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #cbd5e1;
+      border-radius: 999px;
+      transition: background 0.2s;
+      cursor: pointer;
+    }
+
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .switch input:checked + .slider {
+      background: #2563eb;
+    }
+
+    .switch input:checked + .slider::before {
+      transform: translateX(16px);
+    }
+
+    .filter-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .filter-actions button {
+      flex: 1;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      border-radius: 0.375rem;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+
+    .filter-actions button:hover {
+      background: #f8fafc;
+    }
+
+    .city-select {
+      width: 100%;
+      margin-top: 0.5rem;
+      padding: 0.4rem 0.5rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      background: #fff;
+      color: #1e293b;
+    }
+
+    .stats {
+      margin-top: auto;
+      font-size: 0.75rem;
+      color: #64748b;
+      line-height: 1.5;
+    }
+
+    #map {
+      flex: 1;
+      min-width: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <img class="logo" src="logo.svg" alt="GeoCity Viewer">
+
+      <div>
+        <h2 class="panel-title">Miasto</h2>
+        <select id="city-select" class="city-select" aria-label="Wybierz miasto">
+          <option value="elblag">Elbląg</option>
+          <option value="trojmiasto">Trójmiasto</option>
+          <option value="warszawa">Warszawa</option>
+        </select>
+      </div>
+
+      <div>
+        <h2 class="panel-title">Rok budowy</h2>
+        <p id="zoom-hint" class="hint">Przybliż mapę, aby zobaczyć budynki.</p>
+        <div class="filter-actions">
+          <button type="button" id="select-all">Wszystkie</button>
+          <button type="button" id="select-none">Żadne</button>
+        </div>
+      </div>
+
+      <div id="filters" class="filters"></div>
+
+      <p id="stats" class="stats">Ładowanie danych…</p>
+    </aside>
+
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
+  <script>
+    const MIN_ZOOM = 13;
+    const BUILDINGS_URL = "./data/buildings.json";
+
+    const CITIES = {
+      elblag: { name: "Elbląg", center: [54.156, 19.404], zoom: 13 },
+      trojmiasto: { name: "Trójmiasto", center: [54.352, 18.646], zoom: 11 },
+      warszawa: { name: "Warszawa", center: [52.230, 21.011], zoom: 11 },
+    };
+
+    const YEAR_RANGES = [
+      { id: "lt1900", label: "<1900", match: (year) => year < 1900 },
+      { id: "1901-1950", label: "1901-1950", match: (year) => year >= 1901 && year <= 1950 },
+      { id: "lata50", label: "lata 50", match: (year) => year >= 1951 && year <= 1960 },
+      { id: "lata60", label: "lata 60", match: (year) => year >= 1961 && year <= 1970 },
+      { id: "lata70", label: "lata 70", match: (year) => year >= 1971 && year <= 1980 },
+      { id: "lata80", label: "lata 80", match: (year) => year >= 1981 && year <= 1989 },
+      { id: "1990-1995", label: "1990-1995", match: (year) => year >= 1990 && year <= 1995 },
+      { id: "1996-2000", label: "1996-2000", match: (year) => year >= 1996 && year <= 2000 },
+      { id: "2001-2005", label: "2001-2005", match: (year) => year >= 2001 && year <= 2005 },
+      { id: "2006-2010", label: "2006-2010", match: (year) => year >= 2006 && year <= 2010 },
+      { id: "2011-2015", label: "2011-2015", match: (year) => year >= 2011 && year <= 2015 },
+      { id: "2016-2020", label: "2016-2020", match: (year) => year >= 2016 && year <= 2020 },
+      { id: "2021-2025", label: "2021-2025", match: (year) => year >= 2021 && year <= 2025 },
+      { id: "gt2025", label: ">2025", match: (year) => year > 2025 },
+    ];
+
+    proj4.defs(
+      "EPSG:2178",
+      "+proj=tmerc +lat_0=0 +lon_0=21 +k=0.999923 +x_0=7500000 +y_0=0 +ellps=GRS80 +units=m +no_defs"
+    );
+
+    const map = L.map("map", {
+      zoomControl: false,
+    }).setView([54.156, 19.404], 13);
+
+    L.control.zoom({ position: "topright" }).addTo(map);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    const buildingsLayer = L.geoJSON(null, {
+      style: {
+        color: "#1d4ed8",
+        weight: 1,
+        fillColor: "#3b82f6",
+        fillOpacity: 0.45,
+      },
+      onEachFeature(feature, layer) {
+        const props = feature.properties;
+        layer.bindPopup(
+          `<strong>${props.identyfikator_budynku}</strong><br>` +
+          `Rok: ${props.rok_zakonczenia_budowy ?? "—"}<br>` +
+          `Działka: ${props._dzialka_identyfikator_egb ?? "—"}`
+        );
+      },
+    }).addTo(map);
+
+    let featuresByRange = new Map();
+    let enabledRanges = new Set();
+
+    function getYearRange(year) {
+      return YEAR_RANGES.find((range) => range.match(year)) ?? null;
+    }
+
+    function transformPosition([x, y]) {
+      const [lng, lat] = proj4("EPSG:2178", "EPSG:4326", [x, y]);
+      return [lng, lat];
+    }
+
+    function transformRing(ring) {
+      return ring.map(transformPosition);
+    }
+
+    function transformGeometry(geometry) {
+      if (!geometry) {
+        return null;
+      }
+
+      if (geometry.type === "Polygon") {
+        return {
+          type: "Polygon",
+          coordinates: geometry.coordinates.map(transformRing),
+        };
+      }
+
+      if (geometry.type === "MultiPolygon") {
+        return {
+          type: "MultiPolygon",
+          coordinates: geometry.coordinates.map((polygon) => polygon.map(transformRing)),
+        };
+      }
+
+      return geometry;
+    }
+
+    function getSourceFeatures(data) {
+      return (data.layers ?? []).flatMap((layer) => layer.features ?? []);
+    }
+
+    function flyToCity(cityId) {
+      const city = CITIES[cityId];
+      if (!city) {
+        return;
+      }
+      map.flyTo(city.center, city.zoom, { duration: 0.8 });
+    }
+
+    function normalizeYear(value) {
+      const year = Number(value);
+      return Number.isFinite(year) ? year : null;
+    }
+
+    function createToggle(range) {
+      const row = document.createElement("div");
+      row.className = "filter-row";
+
+      const label = document.createElement("label");
+      label.htmlFor = `range-${range.id}`;
+      label.textContent = range.label;
+
+      const switchEl = document.createElement("label");
+      switchEl.className = "switch";
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = `range-${range.id}`;
+      input.checked = (featuresByRange.get(range.id)?.length ?? 0) > 0;
+      input.disabled = (featuresByRange.get(range.id)?.length ?? 0) === 0;
+
+      const slider = document.createElement("span");
+      slider.className = "slider";
+
+      switchEl.appendChild(input);
+      switchEl.appendChild(slider);
+      row.appendChild(label);
+      row.appendChild(switchEl);
+
+      if (input.disabled) {
+        row.style.opacity = "0.45";
+      }
+
+      input.addEventListener("change", () => {
+        if (input.checked) {
+          enabledRanges.add(range.id);
+        } else {
+          enabledRanges.delete(range.id);
+        }
+        updateBuildingsLayer();
+      });
+
+      return row;
+    }
+
+    function getVisibleFeatures() {
+      if (map.getZoom() < MIN_ZOOM) {
+        return [];
+      }
+
+      const features = [];
+      for (const rangeId of enabledRanges) {
+        const rangeFeatures = featuresByRange.get(rangeId);
+        if (rangeFeatures) {
+          features.push(...rangeFeatures);
+        }
+      }
+      return features;
+    }
+
+    function updateBuildingsLayer() {
+      const zoomHint = document.getElementById("zoom-hint");
+      const stats = document.getElementById("stats");
+      const visible = getVisibleFeatures();
+
+      buildingsLayer.clearLayers();
+      if (visible.length > 0) {
+        buildingsLayer.addData({
+          type: "FeatureCollection",
+          features: visible,
+        });
+      }
+
+      zoomHint.classList.toggle("hidden", map.getZoom() >= MIN_ZOOM);
+      stats.textContent =
+        `Widoczne: ${visible.length}\n` +
+        `Zoom: ${map.getZoom()} (min. ${MIN_ZOOM})`;
+    }
+
+    function setAllRanges(enabled) {
+      document.querySelectorAll("#filters input[type=checkbox]").forEach((input) => {
+        if (input.disabled) {
+          return;
+        }
+        input.checked = enabled;
+        const rangeId = input.id.replace("range-", "");
+        if (enabled) {
+          enabledRanges.add(rangeId);
+        } else {
+          enabledRanges.delete(rangeId);
+        }
+      });
+      updateBuildingsLayer();
+    }
+
+    async function loadBuildings() {
+      const response = await fetch(BUILDINGS_URL);
+      if (!response.ok) {
+        throw new Error(`Nie udało się wczytać ${BUILDINGS_URL}`);
+      }
+
+      const data = await response.json();
+      const sourceFeatures = getSourceFeatures(data);
+      const bounds = L.latLngBounds([]);
+      featuresByRange = new Map(YEAR_RANGES.map((range) => [range.id, []]));
+
+      for (const feature of sourceFeatures) {
+        const geometry = transformGeometry(feature.geometry);
+        if (!geometry) {
+          continue;
+        }
+
+        const year = normalizeYear(feature.properties?.rok_zakonczenia_budowy);
+        if (year === null) {
+          continue;
+        }
+
+        const range = getYearRange(year);
+        if (!range) {
+          continue;
+        }
+
+        const geoFeature = {
+          type: "Feature",
+          properties: feature.properties,
+          geometry,
+        };
+
+        featuresByRange.get(range.id).push(geoFeature);
+
+        const tempLayer = L.geoJSON(geoFeature);
+        bounds.extend(tempLayer.getBounds());
+      }
+
+      const filters = document.getElementById("filters");
+      filters.replaceChildren();
+
+      enabledRanges = new Set(
+        YEAR_RANGES
+          .filter((range) => featuresByRange.get(range.id).length > 0)
+          .map((range) => range.id)
+      );
+
+      for (const range of YEAR_RANGES) {
+        filters.appendChild(createToggle(range));
+      }
+
+      if (bounds.isValid()) {
+        map.fitBounds(bounds.pad(0.05));
+        document.getElementById("city-select").value = "elblag";
+      }
+
+      updateBuildingsLayer();
+    }
+
+    document.getElementById("city-select").addEventListener("change", (event) => {
+      flyToCity(event.target.value);
+    });
+    document.getElementById("select-all").addEventListener("click", () => setAllRanges(true));
+    document.getElementById("select-none").addEventListener("click", () => setAllRanges(false));
+    map.on("zoomend", updateBuildingsLayer);
+
+    loadBuildings().catch((error) => {
+      document.getElementById("stats").textContent = error.message;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

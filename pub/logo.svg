@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 48" role="img" aria-label="GeoCity Viewer">
+  <rect x="2" y="10" width="28" height="28" rx="4" fill="#2563eb"/>
+  <path d="M8 30 L16 18 L24 30 Z" fill="#fff"/>
+  <text x="38" y="32" font-family="system-ui, sans-serif" font-size="18" font-weight="700" fill="#1e293b">GeoCity</text>
+</svg>
