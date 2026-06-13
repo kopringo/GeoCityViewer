@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Odczyt GeoPackage i zapis warstw, kolumn i danych jako JSON."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
